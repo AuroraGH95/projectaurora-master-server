@@ -1,35 +1,35 @@
-// Add a "Handshake" store
-let pendingHolePunches = {};
+import express from 'express';
+import cors from 'cors';
 
-app.post('/request-connection', (req, res) => {
-    const { targetLobbyId, myUsername, myInternalPort } = req.body;
-    const clientPublicIp = req.ip.replace('::ffff:', '');
-    const clientPublicPort = req.socket.remotePort; // This is the port the router used
+const app = express();
+app.use(cors());
+app.use(express.json());
 
-    const host = lobbies[targetLobbyId];
-    if (!host) return res.status(404).send("Lobby not found");
+let activeLobbies = [];
 
-    // Store the request so the host can find it
-    pendingHolePunches[targetLobbyId] = {
-        clientIp: clientPublicIp,
-        clientPort: clientPublicPort,
-        clientUsername: myUsername
-    };
-
-    // Give the Client the Host's info
-    res.json({
-        hostIp: host.ip,
-        hostPort: host.port
+// 1. Host registers their lobby here
+app.post('/announce', (req, res) => {
+    const { username, lobbyName } = req.body;
+    const publicIp = req.ip.replace('::ffff:', ''); 
+    
+    // Remove old lobby from same IP if it exists
+    activeLobbies = activeLobbies.filter(l => l.ip !== publicIp);
+    
+    activeLobbies.push({
+        username,
+        lobbyName,
+        ip: publicIp,
+        lastSeen: Date.now()
     });
+    res.json({ success: true });
 });
 
-// Host polls this to see if anyone is trying to join
-app.get('/check-requests/:lobbyId', (req, res) => {
-    const request = pendingHolePunches[req.params.lobbyId];
-    if (request) {
-        delete pendingHolePunches[req.params.lobbyId]; // Clear it
-        res.json(request);
-    } else {
-        res.json(null);
-    }
+// 2. Clients get the list here
+app.get('/lobbies', (req, res) => {
+    // Clean up dead lobbies (older than 30 seconds)
+    activeLobbies = activeLobbies.filter(l => Date.now() - l.lastSeen < 30000);
+    res.json(activeLobbies);
 });
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Master Server on port ${PORT}`));
