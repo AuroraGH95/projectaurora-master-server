@@ -1,47 +1,35 @@
-const express = require('express');
-const cors = require('cors');
-const app = express();
+// Add a "Handshake" store
+let pendingHolePunches = {};
 
-// This is very important for Render! 
-// It allows the server to see the REAL IP of the players.
-app.set('trust proxy', true); 
+app.post('/request-connection', (req, res) => {
+    const { targetLobbyId, myUsername, myInternalPort } = req.body;
+    const clientPublicIp = req.ip.replace('::ffff:', '');
+    const clientPublicPort = req.socket.remotePort; // This is the port the router used
 
-app.use(cors());
-app.use(express.json());
+    const host = lobbies[targetLobbyId];
+    if (!host) return res.status(404).send("Lobby not found");
 
-let lobbies = {};
+    // Store the request so the host can find it
+    pendingHolePunches[targetLobbyId] = {
+        clientIp: clientPublicIp,
+        clientPort: clientPublicPort,
+        clientUsername: myUsername
+    };
 
-// --- ADD THIS NEW ROUTE HERE ---
-app.get('/', (req, res) => {
-    res.send(`
-        <html>
-            <body style="font-family: sans-serif; text-align: center; padding-top: 50px;">
-                <h1>🎸 Project Aurora Master Server</h1>
-                <p style="color: green;">✔ Status: Online and Ready</p>
-                <p>Lobbies active: ${Object.keys(lobbies).length}</p>
-                <hr style="width: 50%; margin: 20px auto;">
-                <small>Connected to Render Cloud</small>
-            </body>
-        </html>
-    `);
-});
-// -------------------------------
-
-app.post('/announce', (req, res) => {
-    const { name, port, players } = req.body;
-    const ip = req.ip.replace('::ffff:', ''); 
-    const id = `${ip}:${port}`;
-    lobbies[id] = { name, ip, port, players, lastSeen: Date.now() };
-    res.status(200).send({ message: "Lobby listed!" });
-});
-
-app.get('/list', (req, res) => {
-    const now = Date.now();
-    Object.keys(lobbies).forEach(id => {
-        if (now - lobbies[id].lastSeen > 60000) delete lobbies[id];
+    // Give the Client the Host's info
+    res.json({
+        hostIp: host.ip,
+        hostPort: host.port
     });
-    res.json(Object.values(lobbies));
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Master Server live on port ${PORT}`));
+// Host polls this to see if anyone is trying to join
+app.get('/check-requests/:lobbyId', (req, res) => {
+    const request = pendingHolePunches[req.params.lobbyId];
+    if (request) {
+        delete pendingHolePunches[req.params.lobbyId]; // Clear it
+        res.json(request);
+    } else {
+        res.json(null);
+    }
+});
